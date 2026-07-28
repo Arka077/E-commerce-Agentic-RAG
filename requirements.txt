@@ -1,0 +1,30 @@
+# Core Dependencies
+python-dotenv
+gradio
+requests
+
+# LLM & Language Processing
+langchain
+langchain-core
+langchain-mistralai
+langchain-community
+
+# Web Search & Scraping
+tavily-python
+beautifulsoup4
+
+# Vector Database & Embeddings
+faiss-cpu
+sentence-transformers
+numpy
+
+# Text Processing & Chunking
+tiktoken
+rank-bm25
+
+# Utilities
+aiohttp==3.9.1
+pydantic-settings
+qdrant-client
+litellm
+aiobreaker
