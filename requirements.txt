@@ -23,7 +23,7 @@ tiktoken
 rank-bm25
 
 # Utilities
-aiohttp==3.9.1
+aiohttp>=3.10.0
 pydantic-settings
 qdrant-client
 litellm
