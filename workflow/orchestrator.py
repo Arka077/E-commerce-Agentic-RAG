@@ -3,24 +3,52 @@ from typing import AsyncGenerator, Dict, Any, List, Literal, TypedDict
 from langgraph.graph import StateGraph, START, END
 
 from core.logger import logger, set_session_id
+from agents.guardrail import run_ecommerce_guardrail
 from agents.decision import run_decision_agent
+from agents.graders import grade_retrieved_documents, grade_hallucination_and_grounding
 from agents.synthesis import run_synthesis_agent
 from workflow.services import SearchService, IndexService, RetrievalService
 
-# 1. Define State structure
 class GraphState(TypedDict):
     query: str
     chat_history: List[Any]
     session_id: str
+    is_ecommerce: bool
     needs_search: bool
     cleaned_documents: List[Dict[str, Any]]
     search_results: List[Dict[str, Any]]
     retrieved_chunks: List[Dict[str, Any]]
+    relevant_chunks: List[Dict[str, Any]]
+    is_sufficient: bool
+    search_retry_count: int
     answer: str
     citations: List[Dict[str, Any]]
+    grounding_report: Dict[str, Any]
     progress_log: List[str]
 
-# 2. Define Node Functions
+async def guardrail_node(state: GraphState) -> Dict[str, Any]:
+    logger.info("Executing guardrail_node")
+    progress_log = list(state.get("progress_log", []))
+    
+    is_ecommerce, message_or_reason = await run_ecommerce_guardrail(
+        state["query"], 
+        state.get("chat_history")
+    )
+    
+    if is_ecommerce:
+        progress_log.append("Guardrail: Shopping intent verified")
+        return {
+            "is_ecommerce": True,
+            "progress_log": progress_log
+        }
+    else:
+        progress_log.append("Guardrail: Non-ecommerce intent flagged")
+        return {
+            "is_ecommerce": False,
+            "answer": message_or_reason,
+            "progress_log": progress_log
+        }
+
 async def decision_node(state: GraphState) -> Dict[str, Any]:
     logger.info("Executing decision_node")
     needs_search, reasoning = await run_decision_agent(state["query"], state["chat_history"])
@@ -38,7 +66,10 @@ async def search_node(state: GraphState) -> Dict[str, Any]:
     progress_log.append("Scraping sources")
     
     search_service = SearchService()
-    result = await search_service.execute(state["query"])
+    result = await search_service.execute(
+        state["query"], 
+        chat_history=state.get("chat_history")
+    )
     
     return {
         "search_results": result["search_results"],
@@ -52,7 +83,10 @@ async def index_node(state: GraphState) -> Dict[str, Any]:
     progress_log.append("Indexing documents")
     
     index_service = IndexService()
-    await index_service.index_documents(state.get("cleaned_documents", []))
+    await index_service.index_documents(
+        state.get("cleaned_documents", []), 
+        session_id=state.get("session_id")
+    )
     
     return {
         "progress_log": progress_log
@@ -64,11 +98,33 @@ async def retrieval_node(state: GraphState) -> Dict[str, Any]:
     progress_log.append("Retrieving knowledge")
     
     retrieval_service = RetrievalService()
-    result = await retrieval_service.retrieve(state["query"])
+    result = await retrieval_service.retrieve(
+        state["query"], 
+        session_id=state.get("session_id")
+    )
     
     return {
         "retrieved_chunks": result["retrieved_chunks"],
         "citations": result["citations"],
+        "progress_log": progress_log
+    }
+
+async def crag_grader_node(state: GraphState) -> Dict[str, Any]:
+    logger.info("Executing crag_grader_node (Corrective RAG)")
+    progress_log = list(state.get("progress_log", []))
+    
+    retrieved = state.get("retrieved_chunks", [])
+    grade_res = await grade_retrieved_documents(state["query"], retrieved)
+    
+    relevant = grade_res.get("relevant_chunks", retrieved)
+    is_sufficient = grade_res.get("is_sufficient", True)
+    ratio = grade_res.get("filter_ratio", f"{len(relevant)}/{len(retrieved)}")
+    
+    progress_log.append(f"CRAG: Kept {ratio} relevant document chunks")
+    
+    return {
+        "relevant_chunks": relevant,
+        "is_sufficient": is_sufficient,
         "progress_log": progress_log
     }
 
@@ -81,33 +137,76 @@ async def synthesis_node(state: GraphState) -> AsyncGenerator[Dict[str, Any], No
         "answer": ""
     }
     
+    chunks_to_use = state.get("relevant_chunks") or state.get("retrieved_chunks", [])
     partial_answer = ""
-    async for chunk in run_synthesis_agent(state["query"], state["retrieved_chunks"], state["chat_history"]):
+    async for chunk in run_synthesis_agent(state["query"], chunks_to_use, state["chat_history"]):
         partial_answer += chunk
         yield {
             "answer": partial_answer
         }
 
-# 3. Define Conditional Routing Edge Logic
+async def self_rag_grader_node(state: GraphState) -> Dict[str, Any]:
+    logger.info("Executing self_rag_grader_node (Grounding & Fact Verification)")
+    progress_log = list(state.get("progress_log", []))
+    
+    answer = state.get("answer", "")
+    chunks_to_use = state.get("relevant_chunks") or state.get("retrieved_chunks", [])
+    
+    report = await grade_hallucination_and_grounding(state["query"], answer, chunks_to_use)
+    badge = report.get("badge_markdown", "")
+    
+    final_answer = answer
+    if badge and badge not in final_answer:
+        final_answer = f"{answer}\n\n{badge}"
+        
+    progress_log.append(f"Self-RAG: Verified with score {report.get('grounding_score', 90)}%")
+    
+    return {
+        "answer": final_answer,
+        "grounding_report": report,
+        "progress_log": progress_log
+    }
+
+def route_guardrail(state: GraphState) -> Literal["decision", "end"]:
+    if state.get("is_ecommerce", False):
+        return "decision"
+    return "end"
+
 def route_decision(state: GraphState) -> Literal["search", "retrieve"]:
-    if state["needs_search"]:
+    if state.get("needs_search", False):
         return "search"
     return "retrieve"
 
-# 4. Construct Graph
+def route_crag(state: GraphState) -> Literal["synthesis", "search"]:
+    retry_count = state.get("search_retry_count", 0)
+    if not state.get("is_sufficient", True) and retry_count < 1:
+        logger.info("CRAG: Chunks insufficient, triggering fallback search")
+        state["search_retry_count"] = retry_count + 1
+        return "search"
+    return "synthesis"
+
 workflow = StateGraph(GraphState)
 
-# Add Nodes
+workflow.add_node("guardrail", guardrail_node)
 workflow.add_node("decision", decision_node)
 workflow.add_node("search", search_node)
 workflow.add_node("index", index_node)
 workflow.add_node("retrieve", retrieval_node)
+workflow.add_node("crag_grader", crag_grader_node)
 workflow.add_node("synthesis", synthesis_node)
+workflow.add_node("self_rag_grader", self_rag_grader_node)
 
-# Set Graph entrypoint
-workflow.add_edge(START, "decision")
+workflow.add_edge(START, "guardrail")
 
-# Set Conditional Edge
+workflow.add_conditional_edges(
+    "guardrail",
+    route_guardrail,
+    {
+        "decision": "decision",
+        "end": END
+    }
+)
+
 workflow.add_conditional_edges(
     "decision",
     route_decision,
@@ -117,13 +216,22 @@ workflow.add_conditional_edges(
     }
 )
 
-# Connect Sibling Nodes
 workflow.add_edge("search", "index")
 workflow.add_edge("index", "retrieve")
-workflow.add_edge("retrieve", "synthesis")
-workflow.add_edge("synthesis", END)
+workflow.add_edge("retrieve", "crag_grader")
 
-# Compile Graph
+workflow.add_conditional_edges(
+    "crag_grader",
+    route_crag,
+    {
+        "synthesis": "synthesis",
+        "search": "search"
+    }
+)
+
+workflow.add_edge("synthesis", "self_rag_grader")
+workflow.add_edge("self_rag_grader", END)
+
 graph = workflow.compile()
 
 
@@ -134,43 +242,56 @@ async def run_ecommerce_workflow(
     session_id: str
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
-    Runs the compiled LangGraph state machine.
-    Yields intermediate state logs, and streams the final synthesis output.
+    Executes the LangGraph workflow and streams progress updates and tokens.
     """
     set_session_id(session_id)
-    logger.info(f"Starting LangGraph workflow for query: '{query}'")
+    logger.info(f"Starting LangGraph workflow for query: '{query}' (Session: {session_id})")
     
-    # Initialize baseline state
     initial_state: GraphState = {
         "query": query,
         "chat_history": chat_history,
         "session_id": session_id,
+        "is_ecommerce": True,
         "needs_search": False,
         "cleaned_documents": [],
         "search_results": [],
         "retrieved_chunks": [],
+        "relevant_chunks": [],
+        "is_sufficient": True,
+        "search_retry_count": 0,
         "answer": "",
         "citations": [],
+        "grounding_report": {},
         "progress_log": []
     }
     
     last_state = initial_state
     
+    run_config = {
+        "configurable": {"session_id": session_id},
+        "tags": ["ecommerce-rag", f"session:{session_id}"],
+        "metadata": {"session_id": session_id, "query": query}
+    }
+    
     try:
-        # Step 1: Stream nodes execution using astream_events
-        async for event in graph.astream_events(initial_state, version="v2"):
+        async for event in graph.astream_events(initial_state, version="v2", config=run_config):
             event_type = event["event"]
             name = event["name"]
             data = event.get("data", {})
             
-            # Handle completion of standard (non-streaming) nodes
-            if event_type == "on_chain_end" and name in ["decision", "search", "index", "retrieve"]:
+            if event_type == "on_chain_end" and name in [
+                "guardrail", "decision", "search", "index", "retrieve", "crag_grader", "self_rag_grader"
+            ]:
                 state_updates = data.get("output", {})
                 last_state = {**last_state, **state_updates}
                 
-                # Format status message for UI
                 status = f"Executing: {name}..."
-                if name == "decision":
+                if name == "guardrail":
+                    if not last_state.get("is_ecommerce", True):
+                        status = "Guardrail: Non-ecommerce intent"
+                    else:
+                        status = "Shopping intent verified..."
+                elif name == "decision":
                     status = "Deciding path..."
                 elif name == "search":
                     status = "Searching web..."
@@ -178,6 +299,10 @@ async def run_ecommerce_workflow(
                     status = "Indexing documents..."
                 elif name == "retrieve":
                     status = "Retrieving context..."
+                elif name == "crag_grader":
+                    status = "Evaluating relevance (CRAG)..."
+                elif name == "self_rag_grader":
+                    status = "Verifying facts (Self-RAG)..."
                     
                 yield {
                     "status": status,
@@ -186,7 +311,6 @@ async def run_ecommerce_workflow(
                     "citations": last_state["citations"]
                 }
                 
-            # Handle intermediate chunks from the streaming synthesis node
             elif event_type == "on_chain_stream" and name == "synthesis":
                 chunk = data.get("chunk", {})
                 last_state = {**last_state, **chunk}

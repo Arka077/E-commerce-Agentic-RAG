@@ -3,34 +3,29 @@ from litellm import Router
 from core.config import settings
 from core.logger import logger
 
-# Create model list for LiteLLM Router
 model_list = []
 
-# Register all Mistral API Keys for Small Model
-for key in settings.MISTRAL_API_KEYS:
+for key in settings.GEMINI_API_KEYS:
     model_list.append({
-        "model_name": "mistral-small",
+        "model_name": "gemini-flash",
         "litellm_params": {
-            "model": "mistral/mistral-small-latest",
-            "api_key": key,
-            "api_base": "https://api.mistral.ai/v1"
+            "model": settings.GEMINI_MODEL,
+            "api_key": key
+        }
+    })
+    model_list.append({
+        "model_name": "gemini-lite",
+        "litellm_params": {
+            "model": settings.GEMINI_LITE_MODEL,
+            "api_key": key
         }
     })
 
-# Register all Mistral API Keys for Large Model
-for key in settings.MISTRAL_API_KEYS:
-    model_list.append({
-        "model_name": "mistral-large",
-        "litellm_params": {
-            "model": "mistral/mistral-large-latest",
-            "api_key": key,
-            "api_base": "https://api.mistral.ai/v1"
-        }
-    })
+logger.info(f"Initialized LiteLLM Router with {len(settings.GEMINI_API_KEYS)} Gemini deployments ({settings.GEMINI_MODEL} & {settings.GEMINI_LITE_MODEL})")
 
-logger.info(f"Initializing LiteLLM Router with {len(settings.MISTRAL_API_KEYS)} deployments per model")
+PRIMARY_MODEL = "gemini-flash"
+GUARDRAIL_MODEL = "gemini-lite"
 
-# Initialize LiteLLM Router with cooldown, retry and load balancing configurations
 llm_router = Router(
     model_list=model_list,
     num_retries=settings.MAX_RETRIES,
@@ -68,7 +63,7 @@ class LLMCircuitBreaker:
         return True
 
 llm_breaker = LLMCircuitBreaker(
-    name="MistralLLM",
+    name="GeminiLLM",
     fail_threshold=settings.CIRCUIT_BREAKER_FAIL_THRESHOLD,
     cooldown_seconds=settings.CIRCUIT_BREAKER_COOLDOWN_SECONDS
 )

@@ -1,54 +1,50 @@
 from typing import List, Tuple
-from core.llm import llm_router, llm_breaker
+from core.llm import llm_router, llm_breaker, PRIMARY_MODEL
 from core.logger import logger
 
 async def run_decision_agent(query: str, chat_history: List = None) -> Tuple[bool, str]:
     """
-    Decision Agent - Decides if web search is needed.
-    Returns: (needs_search: bool, reasoning: str)
+    Determines whether a new web search is required or existing context is sufficient.
     """
     logger.info("Running Decision Agent")
     
     if chat_history is None:
         chat_history = []
         
-    # Check if we have previous answers
     if not chat_history or len(chat_history) <= 1:
         logger.info("First query: Search is required")
         return True, "First query - need fresh data"
         
-    # Build conversation context
     context = "Previous Conversation:\n"
-    for msg in chat_history[-6:]:  # Last 3 exchanges
+    for msg in chat_history[-6:]:
         if isinstance(msg, dict):
             role = msg.get("role", "").upper()
-            content = msg.get("content", "")[:200]
+            content = msg.get("content", "")[:1200]
         else:
             try:
                 role = "USER" if msg[0] else "ASSISTANT"
-                content = (msg[0] or msg[1] or "")[:200]
+                content = (msg[0] or msg[1] or "")[:1200]
             except Exception:
                 continue
         context += f"{role}: {content}\n"
         
-    # Prepare messages
     messages = [
         {
             "role": "system",
             "content": (
-                "You are a decision agent for e-commerce queries.\n\n"
-                "Analyze if the current query can be answered from PREVIOUS conversation context or if it needs NEW web search.\n\n"
-                "Rules:\n"
-                "1. If query asks about SPECIFIC products/prices/comparisons from before -> NO search needed, use previous context\n"
-                "2. If query asks for DIFFERENT products or NEW information -> YES search needed\n"
-                "3. If query is a follow-up question about something already discussed -> NO search needed\n"
-                "4. If unclear or asking for LATEST data -> YES search needed\n\n"
-                "Respond with ONLY: \"SEARCH\" or \"CONTEXT\""
+                "You are an intelligent decision agent for an e-commerce assistant.\n\n"
+                "Your task: Decide if the current user query requires a NEW WEB SEARCH or if it can be answered using the EXISTING CONVERSATION and indexed knowledge base.\n\n"
+                "CRITICAL ROUTING RULES:\n"
+                "1. If the user asks a follow-up question referencing previously discussed products, options, or recommendations (e.g., 'tell me the specs of the above products', 'give details on those laptops', 'compare them', 'which one should I buy', 'how is the battery of the first one?') -> Output 'CONTEXT'. DO NOT search the web because the full specifications are already available in the knowledge base and conversation.\n"
+                "2. If the user asks for clarifications, price comparisons, or pros/cons of products already mentioned -> Output 'CONTEXT'.\n"
+                "3. If the user asks about an entirely DIFFERENT product category, brand, or new item NOT mentioned in the conversation -> Output 'SEARCH'.\n"
+                "4. If the user explicitly asks for 'new/unrelated products' or wants to restart search -> Output 'SEARCH'.\n\n"
+                "Output ONLY one word: either 'CONTEXT' or 'SEARCH'."
             )
         },
         {
             "role": "user",
-            "content": f"{context}\n\nCurrent query: {query}\n\nDecision: (respond with ONLY \"SEARCH\" or \"CONTEXT\")"
+            "content": f"{context}\n\nCurrent User Query: {query}\n\nDecision (Respond with ONLY 'CONTEXT' or 'SEARCH'):"
         }
     ]
     
@@ -58,16 +54,23 @@ async def run_decision_agent(query: str, chat_history: List = None) -> Tuple[boo
         
     try:
         response = await llm_router.acompletion(
-            model="mistral-small",
+            model=PRIMARY_MODEL,
             messages=messages,
             temperature=0.0
         )
         decision = response.choices[0].message.content.strip().upper()
         llm_breaker.record_success()
         
-        needs_search = "SEARCH" in decision
+        # Robust check: prioritize CONTEXT if mentioned or if it starts with CONTEXT
+        if "CONTEXT" in decision:
+            needs_search = False
+        elif "SEARCH" in decision:
+            needs_search = True
+        else:
+            needs_search = False
+            
         reasoning = f"Decision: {'Will search web' if needs_search else 'Will use previous context'}"
-        logger.info(f"Decision Agent reasoning: {reasoning}")
+        logger.info(f"Decision Agent: {decision} -> {reasoning}")
         return needs_search, reasoning
     except Exception as e:
         llm_breaker.record_failure()

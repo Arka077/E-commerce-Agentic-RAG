@@ -6,12 +6,13 @@ requests
 # LLM & Language Processing
 langchain
 langchain-core
-langchain-mistralai
 langchain-community
+langgraph
 
 # Web Search & Scraping
 tavily-python
 beautifulsoup4
+crawl4ai
 
 # Vector Database & Embeddings
 faiss-cpu
@@ -22,9 +23,10 @@ numpy
 tiktoken
 rank-bm25
 
-# Utilities
+# Utilities & Observability
 aiohttp>=3.10.0
 pydantic-settings
 qdrant-client
 litellm
 aiobreaker
+langsmith

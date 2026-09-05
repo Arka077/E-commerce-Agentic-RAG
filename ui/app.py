@@ -13,26 +13,20 @@ async def chat_interface(message: str, chat_history: List, session_id: str):
     # Append the user message to history
     chat_history = list(chat_history)
     chat_history.append({"role": "user", "content": message})
-    
-    # Pre-append the assistant placeholder message
     chat_history.append({"role": "assistant", "content": "⏳ Initializing RAG pipeline..."})
     yield "", chat_history, "⏳ **Status:** Initializing RAG pipeline..."
     
     try:
-        # Run workflow and consume async generator
         async for step in run_ecommerce_workflow(message, chat_history[:-1], session_id):
             status = step["status"]
             answer = step["answer"]
             progress_log = step.get("progress_log", [])
             citations = step.get("citations", [])
             
-            # 1. Format simplified, user-friendly status outside of chatbot
             status_text = f"⚙️ **Status:** {status}"
             
-            # 2. Filter process log to keep only high-level user-meaningful events
             filtered_logs = []
             for log in progress_log:
-                # Do not display internal implementation details
                 if any(x in log for x in [
                     "parent &", "child chunks", 
                     "Indexing", "Indexed", 
@@ -42,9 +36,10 @@ async def chat_interface(message: str, chat_history: List, session_id: str):
                 ]):
                     continue
                 
-                # Format to user-friendly messages
                 cleaned_log = log
-                if "Decision:" in log:
+                if "Guardrail:" in log:
+                    cleaned_log = "🛡️ Verifying e-commerce shopping intent"
+                elif "Decision:" in log:
                     cleaned_log = "🤔 Deciding whether fresh information is needed"
                 elif "Generating search" in log or "search queries" in log:
                     cleaned_log = "🔍 Formulating search queries"
@@ -52,15 +47,18 @@ async def chat_interface(message: str, chat_history: List, session_id: str):
                     cleaned_log = "🔍 Searching the web for the latest product details"
                 elif "Scraping" in log or "Scraped:" in log:
                     cleaned_log = "📥 Scraping product specs and pricing sources"
+                elif "CRAG:" in log:
+                    cleaned_log = "⚖️ Validating document relevance & filtering noise (CRAG)"
                 elif "Synthesizing" in log or "Generating answer" in log:
-                    cleaned_log = "💡 Generating the final answer"
+                    cleaned_log = "💡 Generating structured comparison and recommendation"
+                elif "Self-RAG:" in log:
+                    cleaned_log = "🛡️ Fact-checking specifications and pricing (Self-RAG)"
                     
                 if cleaned_log not in filtered_logs:
                     filtered_logs.append(cleaned_log)
             
             logs_markdown = "\n".join(f"✓ {log}" for log in filtered_logs) if filtered_logs else "*No logs yet.*"
             
-            # 3. Stream ONLY the answer in chatbot. Citations are appended only after Complete.
             if status == "Complete":
                 status_text = "🟢 **Status:** Complete"
                 formatted_response = answer
@@ -76,8 +74,6 @@ async def chat_interface(message: str, chat_history: List, session_id: str):
                 formatted_response = answer
                 
             chat_history[-1] = {"role": "assistant", "content": formatted_response}
-            
-            # Yield in real-time (logs stream immediately)
             yield "", chat_history, status_text
                 
     except Exception as e:
@@ -88,9 +84,7 @@ async def chat_interface(message: str, chat_history: List, session_id: str):
         }
         yield "", chat_history, "🔴 **Status:** Error"
 
-# Build Gradio interface
 with gr.Blocks(title="🛍️ E-commerce Chat RAG") as demo:
-    # Session-specific state storage
     session_id_state = gr.State(lambda: str(uuid.uuid4())[:8])
     
     gr.Markdown("""
@@ -101,7 +95,6 @@ with gr.Blocks(title="🛍️ E-commerce Chat RAG") as demo:
     *Agents:* 🔍 Search → 📄 Chunk → 🗂️ Index → 🔎 Retrieve → 💡 Synthesize
     """)
     
-    # Status display outside of chatbot
     status_display = gr.Markdown(value="🟢 **Status:** Ready")
     
     chatbot = gr.Chatbot(
@@ -118,9 +111,6 @@ with gr.Blocks(title="🛍️ E-commerce Chat RAG") as demo:
         )
         submit_btn = gr.Button("Send 📤", variant="primary", scale=1)
         
-   
-        
-    # Wire submit events
     submit_btn.click(
         fn=chat_interface,
         inputs=[msg, chatbot, session_id_state],

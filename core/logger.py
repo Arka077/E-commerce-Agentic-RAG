@@ -12,6 +12,16 @@ class SessionIDFilter(logging.Filter):
         record.session_id = session_id_var.get() or "system"
         return True
 
+# Reconfigure stdout/stderr on Windows to avoid UnicodeEncodeError for ₹, emojis, etc.
+if sys.platform == "win32":
+    try:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 def setup_logger(name: str = "ecommerce_chatbot") -> logging.Logger:
     logger = logging.getLogger(name)
     if logger.handlers:
@@ -19,7 +29,7 @@ def setup_logger(name: str = "ecommerce_chatbot") -> logging.Logger:
         
     logger.setLevel(logging.INFO)
     
-    # Stdout stream handler
+    # Stdout stream handler with utf-8 fallback
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.INFO)
     
