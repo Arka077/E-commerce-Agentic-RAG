@@ -127,23 +127,37 @@ async def grade_hallucination_and_grounding(
         }
 
     context_snippets = []
-    for i, ch in enumerate(context_chunks[:4]):
-        snippet = (ch.get("document") or "")[:1200].replace("\n", " ")
-        context_snippets.append(f"Doc[{i+1}]: {snippet}")
-    context_text = "\n".join(context_snippets)
+    for i, ch in enumerate(context_chunks[:5]):
+        doc_text = (ch.get("document") or "").strip()
+        child_hit = (ch.get("child_match_snippet") or "").strip()
+        source = ch.get("metadata", {}).get("source", f"Doc[{i+1}]")
+        
+        hit_text = f"Top Query Match: {child_hit}\n" if child_hit else ""
+        context_snippets.append(
+            f"=== Source [{i+1}]: {source} ===\n"
+            f"{hit_text}"
+            f"Full Document Content:\n{doc_text[:3500]}"
+        )
+    context_text = "\n\n".join(context_snippets)
 
-    answer_snippet = answer[:2500]
+    answer_snippet = answer[:6000]
 
     system_prompt = (
-        "You are a Self-RAG Hallucination and Factuality Grader for an e-commerce assistant.\n"
-        "Assess whether the synthesized answer's factual claims, product specifications, and prices (₹ INR) "
-        "are grounded in the provided context documents or reasonable inferences from them.\n\n"
+        "You are a Self-RAG Grounding and Hallucination Grader for an e-commerce assistant.\n"
+        "Your task is to objectively check whether the recommended product models, specifications, and prices (₹ INR) "
+        "in the synthesized response are present in or reasonably derived from the provided context documents.\n\n"
+        "EVALUATION CRITERIA:\n"
+        "1. Check if the recommended product models (e.g., brand and model name) appear in any of the context documents.\n"
+        "2. If a model name is found in the context documents, its standard accompanying specifications (e.g. processor, RAM, SSD, screen size) "
+        "and prices mentioned in retailer listings are GROUNDED.\n"
+        "3. Only flag a model if it is entirely absent from all context sources, or if its price directly contradicts the sources.\n"
+        "4. Assign a grounding score from 0 to 100 (85-100: well grounded in the provided sources; 70-84: mostly grounded with minor gaps; <70: major hallucinations).\n\n"
         "Output JSON only with this structure:\n"
         "{\n"
         "  \"is_grounded\": true/false,\n"
         "  \"grounding_score\": 0-100,\n"
-        "  \"flags\": [\"<any major hallucination or price discrepancy, if found>\"],\n"
-        "  \"summary\": \"<short verdict>\"\n"
+        "  \"flags\": [\"<major hallucination or contradiction, if any>\"],\n"
+        "  \"summary\": \"<verdict>\"\n"
         "}"
     )
 
