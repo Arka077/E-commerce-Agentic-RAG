@@ -16,15 +16,22 @@ def ensure_playwright_browsers():
     try:
         logger.info("Ensuring Playwright browser binaries are ready...")
         res = subprocess.run(
-            [sys.executable, "-m", "playwright", "install", "chromium"],
+            [sys.executable, "-m", "playwright", "install", "--with-deps", "chromium"],
             capture_output=True,
             text=True,
             timeout=180
         )
+        if res.returncode != 0:
+            res = subprocess.run(
+                [sys.executable, "-m", "playwright", "install", "chromium"],
+                capture_output=True,
+                text=True,
+                timeout=180
+            )
         if res.returncode == 0:
             logger.info("Playwright Chromium is installed and ready.")
         else:
-            logger.warning(f"Playwright installation warning: {res.stderr[:200]}")
+            logger.warning(f"Playwright installation note: {res.stderr[:200]}")
     except Exception as e:
         logger.warning(f"Playwright auto-install check encountered: {e}")
 

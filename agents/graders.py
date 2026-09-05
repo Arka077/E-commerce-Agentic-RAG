@@ -128,11 +128,11 @@ async def grade_hallucination_and_grounding(
 
     context_snippets = []
     for i, ch in enumerate(context_chunks[:4]):
-        snippet = (ch.get("document") or "")[:400].replace("\n", " ")
+        snippet = (ch.get("document") or "")[:1200].replace("\n", " ")
         context_snippets.append(f"Doc[{i+1}]: {snippet}")
     context_text = "\n".join(context_snippets)
 
-    answer_snippet = answer[:1500]
+    answer_snippet = answer[:2500]
 
     system_prompt = (
         "You are a Self-RAG Hallucination and Factuality Grader for an e-commerce assistant.\n"

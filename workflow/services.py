@@ -114,24 +114,34 @@ class SearchService:
         scrape_results = await asyncio.gather(*scrape_tasks, return_exceptions=True)
             
         for doc, res in zip(curated_docs, scrape_results):
+            scraped_text = ""
+            structured_data = None
             if isinstance(res, Exception):
-                logger.error(f"SearchService: Scraper task for {doc['url']} failed: {str(res)}")
+                logger.warning(f"SearchService: Scraper task for {doc['url']} failed: {str(res)}")
             elif isinstance(res, dict):
                 text = res.get("text", "")
                 if text and not text.startswith("Error") and text != "Insufficient content":
-                    cleaned_documents.append({
-                        "url": doc["url"],
-                        "content": text,
-                        "source": doc.get("domain", ""),
-                        "structured_data": res.get("metadata", {}).get("structured_data")
-                    })
+                    scraped_text = text
+                    structured_data = res.get("metadata", {}).get("structured_data")
             elif isinstance(res, str) and not res.startswith("Error") and res != "Insufficient content":
+                scraped_text = res
+            
+            if scraped_text:
                 cleaned_documents.append({
                     "url": doc["url"],
-                    "content": res,
+                    "content": scraped_text,
                     "source": doc.get("domain", ""),
-                    "structured_data": None
+                    "structured_data": structured_data
                 })
+            else:
+                snippet = doc.get("content", "")
+                if snippet and len(snippet) > 40:
+                    cleaned_documents.append({
+                        "url": doc["url"],
+                        "content": f"Title: {doc.get('title', '')}\nSnippet: {snippet}",
+                        "source": doc.get("domain", ""),
+                        "structured_data": None
+                    })
             
         return {
             "search_results": curated_docs,

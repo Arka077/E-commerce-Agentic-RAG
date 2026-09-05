@@ -18,10 +18,17 @@ def run_curator_agent(search_results: List[Dict[str, Any]]) -> List[Dict[str, An
     unique_results = []
     seen_urls = set()
     
+    BLOCKED_DOMAINS = {"facebook.com", "instagram.com", "tiktok.com", "pinterest.com", "threads.net"}
+    
     for result in search_results:
         url = result.get("url", "")
         if not url or url in seen_urls:
             continue
+            
+        domain = extract_domain(url)
+        if any(b in domain for b in BLOCKED_DOMAINS):
+            continue
+            
         seen_urls.add(url)
         
         unique_results.append({
