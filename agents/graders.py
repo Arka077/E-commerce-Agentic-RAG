@@ -57,7 +57,6 @@ async def grade_retrieved_documents(query: str, retrieved_chunks: List[Dict[str,
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            temperature=0.0,
             response_format={"type": "json_object"}
         )
         content = response.choices[0].message.content.strip()
@@ -157,7 +156,6 @@ async def grade_hallucination_and_grounding(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            temperature=0.0,
             response_format={"type": "json_object"}
         )
         content = response.choices[0].message.content.strip()

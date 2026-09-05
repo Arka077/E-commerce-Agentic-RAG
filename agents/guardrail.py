@@ -58,7 +58,6 @@ async def run_ecommerce_guardrail(query: str, chat_history: List[Any] = None) ->
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            temperature=0.0,
             response_format={"type": "json_object"}
         )
         content = response.choices[0].message.content.strip()

@@ -75,7 +75,10 @@ async def run_synthesis_agent(
         "   - Provide 2-3 genuine pros and at least 1-2 realistic cons or trade-offs for each product based on user reviews or expert tests in the context.\n\n"
         "5. BUYING ADVICE & FINAL VERDICT:\n"
         "   - Give clear, decisive recommendations based on user priorities (e.g., 'Best Overall', 'Best Value for Money', 'Best Premium Choice').\n"
-        "   - If answering a follow-up query, seamlessly build upon previously discussed context without repeating the entire conversation."
+        "   - If answering a follow-up query, seamlessly build upon previously discussed context without repeating the entire conversation.\n\n"
+        "6. STRICT FACTUAL GROUNDING:\n"
+        "   - Ground all product models, specifications, and prices strictly on the provided context.\n"
+        "   - If the context only has partial details or mentions a model without full specs, state what was found and do NOT invent ungrounded specs or prices."
     )
     
     user_prompt = f"""
@@ -86,7 +89,7 @@ Current User Query: {query}
 Retrieved Knowledge Base Context:
 {context}
 
-Please provide a detailed, beautifully structured e-commerce recommendation including Markdown comparison tables, detailed specifications, current ₹ INR pricing, pros/cons, and final buying advice:"""
+Please provide a detailed, beautifully structured e-commerce recommendation based strictly on the retrieved knowledge:"""
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -102,7 +105,6 @@ Please provide a detailed, beautifully structured e-commerce recommendation incl
         response = await llm_router.acompletion(
             model=PRIMARY_MODEL,
             messages=messages,
-            temperature=0.2,
             stream=True
         )
         

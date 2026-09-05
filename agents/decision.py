@@ -55,8 +55,7 @@ async def run_decision_agent(query: str, chat_history: List = None) -> Tuple[boo
     try:
         response = await llm_router.acompletion(
             model=PRIMARY_MODEL,
-            messages=messages,
-            temperature=0.0
+            messages=messages
         )
         decision = response.choices[0].message.content.strip().upper()
         llm_breaker.record_success()

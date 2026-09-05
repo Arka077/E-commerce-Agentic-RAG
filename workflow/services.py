@@ -46,8 +46,7 @@ class SearchService:
         try:
             res = await llm_router.acompletion(
                 model=PRIMARY_MODEL,
-                messages=messages,
-                temperature=0.0
+                messages=messages
             )
             rewritten = res.choices[0].message.content.strip().strip('"').strip("'")
             if rewritten and len(rewritten) > 3:
@@ -83,8 +82,7 @@ class SearchService:
         try:
             response = await llm_router.acompletion(
                 model=PRIMARY_MODEL,
-                messages=messages,
-                temperature=0.2
+                messages=messages
             )
             raw_content = response.choices[0].message.content
             
