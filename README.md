@@ -54,19 +54,6 @@ python app.py
 
 That starts the Gradio interface defined in `ui/app.py`.
 
-## Startup Call Chain
-
-When you run `python app.py`, this is what happens:
-
-```mermaid
-flowchart TD
-    A[python app.py] --> B[Load .env]
-    B --> C[core/config.py creates settings]
-    C --> D[core/logger.py creates logger]
-    D --> E[Import ui/app.py demo object]
-    E --> F[demo.launch() starts Gradio]
-```
-
 ### Startup explained step by step
 
 1. `app.py` loads environment variables from `.env`.
